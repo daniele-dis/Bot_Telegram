@@ -1,4 +1,4 @@
-
+import os
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
@@ -7,14 +7,18 @@ from telegram.ext import ContextTypes
 # che alla fine sempre di interfacciamento è.
 
 # Importiamo le tue funzioni originali dagli altri file
-from monthly_expenses import salva_spesa, get_totale_mese, mostra_report
+from monthly_expenses import salva_spesa, get_totale_mese, mostra_report, cancella_ultima_spesa
 from weather import get_weather
+
+# Prende la stringa "123,456" dal .env e la trasforma in una lista di numeri [123, 456]
+ALLOWED_USERS = [int(i) for i in os.getenv("ALLOWED_USERS", "").split(",") if i.strip()]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tasti = [
         ['🤖 Chi sei?', '🕒 Che ore sono?'],
-        ['Meteo 🌤️', '❓ Aiuto'],
-        ['Spesa 💰', '📊 Report Spese']
+        ['🌤️ Meteo', '❓ Aiuto'],
+        ['💰 Spesa', '📊 Report Spese'],
+        ['🔙 Annulla Ultima']
     ]
     menu = ReplyKeyboardMarkup(tasti, resize_keyboard=True)
     await update.message.reply_text(
@@ -37,6 +41,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     testo_ricevuto = update.message.text
     u_data = context.user_data
+    user_id = update.effective_user.id
+
+    # CONTROLLO SICUREZZA
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("Spiacente, questo bot è privato. 🤐")
+        return
+    
+    if testo_ricevuto.lower() in ["annulla", "esci", "stop"]:
+        u_data['attendo_spesa'] = False
+        u_data['attendo_citta'] = False
+        await update.message.reply_text("Operazione annullata. Torniamo al menu!")
+        return
 
     if testo_ricevuto == "🤖 Chi sei?":
         await update.message.reply_text("Sono il tuo assistente Python! 💻")
@@ -52,10 +68,14 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     elif testo_ricevuto == "Spesa 💰":
         u_data['attendo_spesa'] = True
         u_data['attendo_citta'] = False
-        await update.message.reply_text("Scrivimi: importo descrizione (es: 45,00 Regalo Mamma)")
+        await update.message.reply_text("Scrivimi: importo descrizione (es: 45,00 Spesa Supermercato)")
         return
     elif testo_ricevuto == "📊 Report Spese":
         await mostra_report(update, context)
+        return
+    elif testo_ricevuto == "🔙 Annulla Ultima":
+        successo, messaggio = cancella_ultima_spesa(user_id)
+        await update.message.reply_text(messaggio)
         return
     elif testo_ricevuto == "❓ Aiuto":
         await help_command(update, context)
@@ -73,11 +93,17 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             descrizione = parti[1]
             salva_spesa(update.effective_user.id, importo, descrizione)
             totale = get_totale_mese(update.effective_user.id)
+            u_data['attendo_spesa'] = False # Chiudiamo lo stato solo se è andata bene
             await update.message.reply_text(f"✅ Segnato: {importo:.2f}€ per '{descrizione}'\n💰 Totale mese: {totale:.2f}€")
-            u_data['attendo_spesa'] = False
-        except Exception as e:
-            print(f"ERRORE REALE: {e}")
-            await update.message.reply_text(f"Errore tecnico. Controlla il terminale o riprova.")
+            
+        except Exception:
+            # Se c'è un errore, NON settiamo False. L'utente resta in "attendo_spesa"
+            await update.message.reply_text(
+                "❌ Errore nel formato!\n"
+                "-Inserisci nuovamente l'importo e la descrizione.\n"
+                "Esempio: 10.50 Pranzo\n\n"
+                "Oppure scrivi 'annulla' per tornare al menu."
+            )
         return
 
     if u_data.get('attendo_citta'):

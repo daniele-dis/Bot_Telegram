@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
+from fpdf import FPDF
 
 def salva_spesa(user_id, importo, descrizione):
     file_path = f"spese_{user_id}.json"
@@ -71,5 +72,85 @@ async def mostra_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         report_testo += f"🔹 {s['data']}: {s['importo']:.2f}€ - {s['descrizione']}\n"
     
     report_testo += f"\n💰 **TOTALE SPESO: {totale:.2f}€**"
+
+    # Genera e invia il PDF
+    file_pdf = genera_pdf_spese(user_id, mese_corrente)
+    if file_pdf:
+        with open(file_pdf, "rb") as document:
+            await context.bot.send_document(
+                chat_id=user_id,
+                document=document,
+                filename=f"Report_{mese_corrente}.pdf",
+                caption="Ecco il tuo report dettagliato in PDF! 📄"
+            )
+        os.remove(file_pdf) # Rimuove il file dal server dopo averlo inviato
+    else:
+        await update.message.reply_text("Non ho dati sufficienti per creare un PDF.")
     
     await update.message.reply_text(report_testo, parse_mode="Markdown")
+
+def genera_pdf_spese(user_id, mese_corrente):
+    file_json = f"spese_{user_id}.json"
+    pdf_filename = f"report_{mese_corrente}_{user_id}.pdf"
+    
+    if not os.path.exists(file_json):
+        return None
+
+    with open(file_json, "r") as f:
+        dati = json.load(f)
+
+    spese = dati.get(mese_corrente, [])
+    if not spese:
+        return None
+
+    # Creazione PDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(190, 10, f"Report Spese - {mese_corrente}", ln=True, align='C')
+    pdf.ln(10)
+
+    # Intestazione Tabella
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(40, 10, "Data", 1)
+    pdf.cell(100, 10, "Descrizione", 1)
+    pdf.cell(50, 10, "Importo", 1)
+    pdf.ln()
+
+    # Contenuto
+    pdf.set_font("Arial", "", 12)
+    totale = 0
+    for s in spese:
+        pdf.cell(40, 10, s['data'], 1)
+        pdf.cell(100, 10, s['descrizione'], 1)
+        pdf.cell(50, 10, f"{s['importo']:.2f} euro", 1)
+        pdf.ln()
+        totale += s['importo']
+
+    pdf.ln(5)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(190, 10, f"TOTALE MENSILE: {totale:.2f} euro", align='R')
+
+    pdf.output(pdf_filename)
+    return pdf_filename
+
+def cancella_ultima_spesa(user_id):
+    file_path = f"spese_{user_id}.json"
+    mese_corrente = datetime.now().strftime("%Y-%m")
+    
+    if not os.path.exists(file_path):
+        return False, "Nessun dato trovato."
+
+    with open(file_path, "r") as f:
+        spese = json.load(f)
+
+    if mese_corrente in spese and len(spese[mese_corrente]) > 0:
+        # Rimuove l'ultimo elemento della lista
+        spesa_rimossa = spese[mese_corrente].pop()
+        
+        with open(file_path, "w") as f:
+            json.dump(spese, f, indent=4)
+        
+        return True, f"Eliminata: {spesa_rimossa['importo']:.2f}€ ({spesa_rimossa['descrizione']})"
+    
+    return False, "Nessuna spesa da eliminare per questo mese."
