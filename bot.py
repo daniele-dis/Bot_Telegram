@@ -1,8 +1,8 @@
 import os
 from dotenv import load_dotenv
 load_dotenv()
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
-from handlers import start, help_command, echo
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from handlers import start, help_command, echo, handle_photo, button_handler
 
 
 async def post_init(application):
@@ -24,9 +24,18 @@ def main() -> None:
     TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # da qui richiamo le funzioni start, help_command ed echo presenti nell'handler.py
+    # 1. Comandi slash
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+
+    # 2. Gestore FOTO (deve stare prima o insieme ai messaggi di testo)
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    # 3. Gestore BOTTONI INLINE (Salva/Scarta)
+    application.add_handler(CallbackQueryHandler(button_handler))
+
+    # 4. Gestore TESTO (Echo e logica menu)
+    # Importante: questo deve restare per ultimo tra i MessageHandler di testo
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     print("BotProvaDani avviato correttamente...")

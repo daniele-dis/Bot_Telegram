@@ -5,6 +5,7 @@ __pycache__/
 
 .env
 *.json
+foto_utenti/
 __pycache__/
 
 # C extensions

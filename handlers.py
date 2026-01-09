@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 # Abbiamo qui tutte le funzioni per l'interfacciamento con l'utente tramite Telegram, anche la funzione echo
@@ -13,12 +13,29 @@ from weather import get_weather
 # Prende la stringa "123,456" dal .env e la trasforma in una lista di numeri [123, 456]
 ALLOWED_USERS = [int(i) for i in os.getenv("ALLOWED_USERS", "").split(",") if i.strip()]
 
+# ----- Definiamo dove salvare le foto
+BASE_SAVE_PATH = "foto_utenti"
+
+def prepara_cartelle(allowed_users):
+    if not os.path.exists(BASE_SAVE_PATH):
+        os.makedirs(BASE_SAVE_PATH)
+    
+    for user_id in allowed_users:
+        user_path = os.path.join(BASE_SAVE_PATH, str(user_id))
+        if not os.path.exists(user_path):
+            os.makedirs(user_path)
+            print(f"Cartella creata per l'utente {user_id}")
+
+# Richiama questa funzione all'avvio del bot
+prepara_cartelle(ALLOWED_USERS)
+# -----
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tasti = [
-        ['🤖 Chi sei?', '🕒 Che ore sono?'],
-        ['🌤️ Meteo', '❓ Aiuto'],
-        ['💰 Spesa', '📊 Report Spese'],
-        ['🔙 Annulla Ultima']
+        ["Chi sei? 🤖", "Che ore sono? 🕒"],
+        ["Meteo 🌤️", "Aiuto ❓"],
+        ["Spesa 💰", "Report Spese 📊"],
+        ["Salva Foto 📸", "Annulla Ultima 🔙"]
     ]
     menu = ReplyKeyboardMarkup(tasti, resize_keyboard=True)
     await update.message.reply_text(
@@ -54,10 +71,10 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Operazione annullata. Torniamo al menu!")
         return
 
-    if testo_ricevuto == "🤖 Chi sei?":
+    if testo_ricevuto == "Chi sei? 🤖":
         await update.message.reply_text("Sono il tuo assistente Python! 💻")
         return
-    elif testo_ricevuto == "🕒 Che ore sono?":
+    elif testo_ricevuto == "Che ore sono? 🕒":
         await update.message.reply_text(f"Sono le {datetime.now().strftime('%H:%M')}!")
         return
     elif testo_ricevuto == "Meteo 🌤️":
@@ -70,16 +87,22 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         u_data['attendo_citta'] = False
         await update.message.reply_text("Scrivimi: importo descrizione (es: 45,00 Spesa Supermercato)")
         return
-    elif testo_ricevuto == "📊 Report Spese":
+    elif testo_ricevuto == "Report Spese 📊":
         await mostra_report(update, context)
         return
-    elif testo_ricevuto == "🔙 Annulla Ultima":
+    elif testo_ricevuto == "Annulla Ultima 🔙":
         successo, messaggio = cancella_ultima_spesa(user_id)
         await update.message.reply_text(messaggio)
         return
-    elif testo_ricevuto == "❓ Aiuto":
+    elif testo_ricevuto == "Aiuto ❓":
         await help_command(update, context)
         return
+    elif testo_ricevuto == "Salva Foto 📸":
+            await update.message.reply_text(
+                "Per salvare una foto nella tua cartella privata, "
+                "inviamela direttamente come immagine (non come file)!"
+            )
+            return
 
     if u_data.get('attendo_spesa'):
         try:
@@ -114,4 +137,53 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(f"Hai scritto: {testo_ricevuto}")
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    
+    if user_id not in ALLOWED_USERS:
+        return
 
+    # Prendiamo l'ID della foto con la risoluzione migliore
+    photo_file = update.message.photo[-1]
+    # Salviamo l'ID del file temporaneamente nei dati utente
+    context.user_data['last_photo_id'] = photo_file.file_id
+
+    # Creiamo i bottoni di conferma
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Salva", callback_data="save_photo"),
+            InlineKeyboardButton("❌ Scarta", callback_data="discard_photo"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Ho ricevuto la foto! Vuoi salvarla nella tua cartella personale?",
+        reply_markup=reply_markup
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer() # Importante per togliere l'icona del caricamento sul tasto
+    
+    user_id = update.effective_user.id
+    data = query.data
+
+    if data == "save_photo":
+        file_id = context.user_data.get('last_photo_id')
+        if file_id:
+            # Scarichiamo il file
+            new_file = await context.bot.get_file(file_id)
+            
+            # Generiamo un nome file basato sulla data e ora
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_name = f"foto_{timestamp}.jpg"
+            save_path = os.path.join(BASE_SAVE_PATH, str(user_id), file_name)
+            
+            await new_file.download_to_drive(save_path)
+            await query.edit_message_text(f"✅ Foto salvata con successo in: {file_name}")
+        else:
+            await query.edit_message_text("⚠️ Errore: non trovo più la foto.")
+            
+    elif data == "discard_photo":
+        await query.edit_message_text("🗑️ Foto scartata.")
