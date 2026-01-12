@@ -3,28 +3,15 @@ from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-# Abbiamo qui tutte le funzioni per l'interfacciamento con l'utente tramite Telegram, anche la funzione echo
-# che alla fine sempre di interfacciamento è.
-
 # Importiamo le tue funzioni originali dagli altri file
 from monthly_expenses import salva_spesa, get_totale_mese, mostra_report, cancella_ultima_spesa
 from weather import get_weather
+from photo_manager import prepara_cartelle, salva_foto_disco
+from shopping import cerca_prezzi
 
 # Prende la stringa "123,456" dal .env e la trasforma in una lista di numeri [123, 456]
 ALLOWED_USERS = [int(i) for i in os.getenv("ALLOWED_USERS", "").split(",") if i.strip()]
 
-# ----- Definiamo dove salvare le foto
-BASE_SAVE_PATH = "foto_utenti"
-
-def prepara_cartelle(allowed_users):
-    if not os.path.exists(BASE_SAVE_PATH):
-        os.makedirs(BASE_SAVE_PATH)
-    
-    for user_id in allowed_users:
-        user_path = os.path.join(BASE_SAVE_PATH, str(user_id))
-        if not os.path.exists(user_path):
-            os.makedirs(user_path)
-            print(f"Cartella creata per l'utente {user_id}")
 
 # Richiama questa funzione all'avvio del bot
 prepara_cartelle(ALLOWED_USERS)
@@ -32,11 +19,11 @@ prepara_cartelle(ALLOWED_USERS)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tasti = [
-        ["Chi sei? 🤖", "Che ore sono? 🕒"],
-        ["Meteo 🌤️", "Aiuto ❓"],
-        ["Spesa 💰", "Report Spese 📊"],
-        ["Salva Foto 📸", "Annulla Ultima 🔙"]
-    ]
+            ["Chi sei? 🤖", "Che ore sono? 🕒"],
+            ["Meteo 🌤️", "Cerca Prezzi 🔍"], # Modificato qui
+            ["Spesa 💰", "Report Spese 📊"],
+            ["Salva Foto 📸", "Annulla Ultima 🔙"]
+        ]
     menu = ReplyKeyboardMarkup(tasti, resize_keyboard=True)
     await update.message.reply_text(
         f'Ciao {update.effective_user.first_name}!👋\nCosa desideri fare?',
@@ -74,29 +61,47 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if testo_ricevuto == "Chi sei? 🤖":
         await update.message.reply_text("Sono il tuo assistente Python! 💻")
         return
+    
     elif testo_ricevuto == "Che ore sono? 🕒":
         await update.message.reply_text(f"Sono le {datetime.now().strftime('%H:%M')}!")
         return
+    
     elif testo_ricevuto == "Meteo 🌤️":
         u_data['attendo_citta'] = True
         u_data['attendo_spesa'] = False
         await update.message.reply_text("Ok! Scrivimi il nome della città.")
         return
+    
+    elif testo_ricevuto == "Cerca Prezzi 🔍":
+        u_data['attendo_prodotto'] = True
+        u_data['attendo_citta'] = False
+        u_data['attendo_spesa'] = False
+        await update.message.reply_text("Cosa vuoi cercare? (es: iPhone 15)")
+        return
+
+    # 3. In fondo alla funzione echo, prima dell'ultimo "Hai scritto:..."
+    if u_data.get('attendo_prodotto'):
+        await update.message.reply_text(f"Sto cercando '{testo_ricevuto}' su siti affidabili... ⏳")
+        risultato = cerca_prezzi(testo_ricevuto)
+        await update.message.reply_text(risultato, parse_mode="HTML", disable_web_page_preview=True)
+        u_data['attendo_prodotto'] = False
+        return
+    
     elif testo_ricevuto == "Spesa 💰":
         u_data['attendo_spesa'] = True
         u_data['attendo_citta'] = False
         await update.message.reply_text("Scrivimi: importo descrizione (es: 45,00 Spesa Supermercato)")
         return
+    
     elif testo_ricevuto == "Report Spese 📊":
         await mostra_report(update, context)
         return
+    
     elif testo_ricevuto == "Annulla Ultima 🔙":
         successo, messaggio = cancella_ultima_spesa(user_id)
         await update.message.reply_text(messaggio)
         return
-    elif testo_ricevuto == "Aiuto ❓":
-        await help_command(update, context)
-        return
+    
     elif testo_ricevuto == "Salva Foto 📸":
             await update.message.reply_text(
                 "Per salvare una foto nella tua cartella privata, "
@@ -164,7 +169,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer() # Importante per togliere l'icona del caricamento sul tasto
+    await query.answer() # Toglie il caricamento dal tasto
     
     user_id = update.effective_user.id
     data = query.data
@@ -172,16 +177,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if data == "save_photo":
         file_id = context.user_data.get('last_photo_id')
         if file_id:
-            # Scarichiamo il file
-            new_file = await context.bot.get_file(file_id)
+            # USIAMO LA FUNZIONE ESTERNA DI PHOTO_MANAGER
+            # Passiamo il bot, l'ID utente e l'ID del file
+            successo, risultato = await salva_foto_disco(context.bot, user_id, file_id)
             
-            # Generiamo un nome file basato sulla data e ora
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_name = f"foto_{timestamp}.jpg"
-            save_path = os.path.join(BASE_SAVE_PATH, str(user_id), file_name)
-            
-            await new_file.download_to_drive(save_path)
-            await query.edit_message_text(f"✅ Foto salvata con successo in: {file_name}")
+            if successo:
+                # 'risultato' contiene il nome del file in caso di successo
+                await query.edit_message_text(f"✅ Foto salvata con successo in: {risultato}")
+            else:
+                # 'risultato' contiene l'errore in caso di fallimento
+                await query.edit_message_text(f"❌ Errore durante il salvataggio: {risultato}")
         else:
             await query.edit_message_text("⚠️ Errore: non trovo più la foto.")
             
