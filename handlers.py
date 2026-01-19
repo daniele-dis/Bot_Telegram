@@ -13,10 +13,6 @@ from shopping import cerca_prezzi
 ALLOWED_USERS = [int(i) for i in os.getenv("ALLOWED_USERS", "").split(",") if i.strip()]
 
 
-# Richiama questa funzione all'avvio del bot
-prepara_cartelle(ALLOWED_USERS)
-# -----
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tasti = [
             ["Chi sei? 🤖", "Che ore sono? 🕒"],
@@ -141,6 +137,11 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await update.message.reply_text(f"Hai scritto: {testo_ricevuto}")
+
+
+# Richiama questa funzione prima delle funzioni per la gestione delle foto
+prepara_cartelle(ALLOWED_USERS)
+# -----
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
