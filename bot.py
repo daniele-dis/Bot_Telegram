@@ -4,6 +4,7 @@ load_dotenv()
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from handlers import start, help_command, echo, handle_photo, button_handler
 
+# !!! bot.py but this is the MAIN
 
 async def post_init(application):
     mio_id = int(os.getenv("MY_TELEGRAM_ID"))
